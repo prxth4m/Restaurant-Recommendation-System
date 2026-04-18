@@ -46,6 +46,8 @@ function DiscoverContent() {
   const [allLocations, setAllLocations] = useState([]);
   const [allCuisines, setAllCuisines] = useState(CUISINE_FALLBACK);
   const [areaSearch, setAreaSearch] = useState('');
+  const [areaOpen, setAreaOpen] = useState(false);
+  const areaRef = useRef(null);
 
   useEffect(() => {
     setUser(getCurrentUser());
@@ -63,11 +65,14 @@ function DiscoverContent() {
     }
   }, []);
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setShowDropdown(false);
+      }
+      if (areaRef.current && !areaRef.current.contains(e.target)) {
+        setAreaOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -309,41 +314,53 @@ function DiscoverContent() {
           </div>
 
           <label className="input-label" style={{ marginBottom: 6 }}>Area</label>
-          <div style={{ position: 'relative', marginBottom: 16 }}>
-            <input
-              type="text"
-              className="input-field"
-              placeholder="Search areas..."
-              value={areaSearch || selArea}
-              onChange={e => { setAreaSearch(e.target.value); setSelArea(''); }}
-              onFocus={() => setAreaSearch(selArea || '')}
-              style={{ fontSize: 13 }}
-            />
-            {areaSearch !== '' && (
+          <div ref={areaRef} style={{ position: 'relative', marginBottom: 16 }}>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="Search areas..."
+                value={areaOpen ? areaSearch : (selArea || '')}
+                onChange={e => { setAreaSearch(e.target.value); setSelArea(''); setAreaOpen(true); }}
+                onFocus={() => { setAreaOpen(true); setAreaSearch(''); }}
+                style={{ fontSize: 13, paddingRight: selArea ? 30 : 12 }}
+              />
+              {selArea && !areaOpen && (
+                <button
+                  onClick={() => { setSelArea(''); setAreaSearch(''); }}
+                  style={{
+                    position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', cursor: 'pointer', fontSize: 14,
+                    color: 'var(--text-muted)', padding: 0, lineHeight: 1
+                  }}
+                >✕</button>
+              )}
+            </div>
+            {areaOpen && (
               <div style={{
                 position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
                 background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: '0 0 8px 8px', maxHeight: 200, overflowY: 'auto',
+                borderRadius: '0 0 8px 8px', maxHeight: 220, overflowY: 'auto',
                 boxShadow: 'var(--shadow-card)'
               }}>
                 <div
-                  style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)' }}
-                  onClick={() => { setSelArea(''); setAreaSearch(''); }}
+                  style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)', fontStyle: 'italic' }}
+                  onClick={() => { setSelArea(''); setAreaSearch(''); setAreaOpen(false); }}
                 >
                   All Areas
                 </div>
                 {allLocations
-                  .filter(a => a.toLowerCase().includes(areaSearch.toLowerCase()))
-                  .slice(0, 20)
+                  .filter(a => !areaSearch || a.toLowerCase().includes(areaSearch.toLowerCase()))
                   .map(a => (
                     <div key={a}
                       style={{
                         padding: '8px 12px', fontSize: 12, cursor: 'pointer',
                         background: selArea === a ? 'var(--primary-light)' : 'transparent',
+                        fontWeight: selArea === a ? 600 : 400,
                       }}
                       onMouseEnter={e => e.target.style.background = 'var(--primary-light)'}
                       onMouseLeave={e => e.target.style.background = selArea === a ? 'var(--primary-light)' : 'transparent'}
-                      onClick={() => { setSelArea(a); setAreaSearch(''); }}
+                      onClick={() => { setSelArea(a); setAreaSearch(''); setAreaOpen(false); }}
                     >
                       {a}
                     </div>
