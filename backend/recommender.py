@@ -121,29 +121,48 @@ def get_cbf_recommendations(
 
 
 # ─── Collaborative Filtering (CF) ───
-def get_cf_recommendations(user_id: str, top_n: int = 10) -> list:
-    """SVD-based CF recommendations. Falls back to popularity if user is cold-start."""
+def get_cf_recommendations(
+    user_id: str, top_n: int = 10,
+    cuisines: list = None, area: str = None,
+    price_min: float = None, price_max: float = None,
+) -> list:
+    """SVD-based CF recommendations with optional filters. Falls back to popularity if cold-start."""
     if df is None or svd_model is None or interactions_df is None:
         return []
 
-    all_restaurant_ids = df['restaurant_id'].tolist()
+    # Apply filters to restrict candidate set
+    filtered = df.copy()
+    if cuisines:
+        pattern = '|'.join([c.lower() for c in cuisines])
+        filtered = filtered[filtered['cuisines'].str.lower().str.contains(pattern, na=False)]
+    if area:
+        filtered = filtered[filtered['location'].str.lower().str.contains(area.lower(), na=False)]
+    if price_min is not None:
+        filtered = filtered[filtered['cost_for_two'] >= price_min]
+    if price_max is not None:
+        filtered = filtered[filtered['cost_for_two'] <= price_max]
+
+    if filtered.empty:
+        return []
+
+    candidate_ids = filtered['restaurant_id'].tolist()
 
     # Check if user has any interactions in training data
     if user_id not in interactions_df['user_id'].values:
-        # Cold-start: return popular restaurants
-        scored = df.copy()
+        # Cold-start: return popular restaurants within filtered set
+        scored = filtered.copy()
         scored['score'] = scored.apply(popularity_score, axis=1)
         return _to_list(scored.sort_values('score', ascending=False).head(top_n))
 
     # Get restaurants already interacted with
     seen = set(interactions_df[interactions_df['user_id'] == user_id]['restaurant_id'].tolist())
-    unseen = [rid for rid in all_restaurant_ids if rid not in seen]
+    unseen = [rid for rid in candidate_ids if rid not in seen]
 
-    # Predict ratings
+    # Predict ratings within filtered candidates
     predictions = []
     for rid in unseen:
         try:
-            pred = svd_model.predict(user_id, rid)
+            pred = svd_model.predict(user_id, str(rid))
             predictions.append((rid, pred.est))
         except Exception:
             predictions.append((rid, 3.5))
@@ -184,7 +203,11 @@ def get_hybrid_recommendations(
         online_order=online_order,
         book_table=book_table,
     )
-    cf = get_cf_recommendations(user_id, top_n=top_n * 2) if user_id else []
+    cf = get_cf_recommendations(
+        user_id, top_n=top_n * 2,
+        cuisines=cuisines, area=area,
+        price_min=price_min, price_max=price_max,
+    ) if user_id else []
 
     # Build score maps
     cbf_map = {r['restaurant_id']: r.get('score', 0) for r in cbf}
@@ -343,7 +366,11 @@ def get_recommendations(
                 price_max=price_max,
             )
         elif technique == "cf":
-            recs_list = get_cf_recommendations(user_id, top_n=top_n)
+            recs_list = get_cf_recommendations(
+                user_id, top_n=top_n,
+                cuisines=cuisine_list, area=area,
+                price_min=price_min, price_max=price_max,
+            )
         else:
             # "hybrid" (default)
             recs_list = get_hybrid_recommendations(
