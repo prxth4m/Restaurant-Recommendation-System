@@ -1,0 +1,358 @@
+# backend/recommender.py — All ML recommendation logic
+import pandas as pd
+import numpy as np
+import joblib
+import json
+import difflib
+import os
+from surprise import SVD
+
+# ─── Globals (populated by load_models) ───
+df = None
+cosine_sim = None
+svd_model = None
+interactions_df = None
+name_to_idx = None
+all_names_lower = None
+max_log_votes = 1.0
+
+
+def load_models(models_dir: str):
+    """Load all ML artefacts into memory. Called once at FastAPI startup."""
+    global df, cosine_sim, svd_model, interactions_df
+    global name_to_idx, all_names_lower, max_log_votes
+
+    df = pd.read_parquet(os.path.join(models_dir, 'zomato_clean.parquet'))
+    df['restaurant_id'] = df.index
+
+    cosine_sim = np.load(os.path.join(models_dir, 'cosine_sim.npy'))
+    svd_model = joblib.load(os.path.join(models_dir, 'svd_model.pkl'))
+    interactions_df = pd.read_parquet(os.path.join(models_dir, 'user_interactions.parquet'))
+
+    with open(os.path.join(models_dir, 'restaurant_names.json')) as f:
+        data = json.load(f)
+        name_to_idx = data['name_to_idx']
+        all_names_lower = data['all_names_lower']
+
+    max_log_votes = np.log1p(df['votes'].max())
+    print(f"[OK] Models loaded: {len(df)} restaurants, cosine {cosine_sim.shape}")
+
+
+# ─── Alpha Ramping ───
+def get_alpha(interaction_count: int) -> float:
+    if interaction_count == 0:
+        return 0.0
+    elif interaction_count <= 2:
+        return 0.1
+    elif interaction_count <= 9:
+        return 0.4
+    else:
+        return 0.7
+
+
+# ─── Popularity Score ───
+def popularity_score(row) -> float:
+    """Weighted score: rating * log(votes), normalised."""
+    rating = float(row.get('rate', 0) or 0)
+    votes = float(row.get('votes', 0) or 0)
+    log_v = np.log1p(votes) / max_log_votes if max_log_votes > 0 else 0
+    return round(0.6 * (rating / 5.0) + 0.4 * log_v, 4)
+
+
+# ─── Content-Based Filtering (CBF) ───
+def get_cbf_recommendations(
+    restaurant_name: str = None,
+    top_n: int = 10,
+    cuisines: list = None,
+    area: str = None,
+    price_min: float = None,
+    price_max: float = None,
+    online_order: bool = None,
+    book_table: bool = None,
+) -> list:
+    """Return top_n CBF recommendations using cosine similarity + optional filters."""
+    if df is None:
+        return []
+
+    filtered = df.copy()
+
+    # Apply filters
+    if cuisines:
+        pattern = '|'.join([c.lower() for c in cuisines])
+        filtered = filtered[filtered['cuisines'].str.lower().str.contains(pattern, na=False)]
+    if area:
+        filtered = filtered[filtered['location'].str.lower().str.contains(area.lower(), na=False)]
+    if price_min is not None:
+        filtered = filtered[filtered['approx_cost'] >= price_min]
+    if price_max is not None:
+        filtered = filtered[filtered['approx_cost'] <= price_max]
+    if online_order is not None:
+        filtered = filtered[filtered['online_order'] == (1 if online_order else 0)]
+    if book_table is not None:
+        filtered = filtered[filtered['book_table'] == (1 if book_table else 0)]
+
+    if filtered.empty:
+        return []
+
+    if restaurant_name and restaurant_name.lower() in [n.lower() for n in name_to_idx.keys()]:
+        # Find the closest match
+        matches = difflib.get_close_matches(restaurant_name.lower(), all_names_lower, n=1, cutoff=0.4)
+        if matches:
+            idx = name_to_idx.get(matches[0])
+            if idx is not None and cosine_sim is not None:
+                sim_scores = list(enumerate(cosine_sim[idx]))
+                sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+                # Filter to only indices in our filtered df
+                filtered_indices = set(filtered.index.tolist())
+                sim_scores = [(i, s) for i, s in sim_scores if i in filtered_indices and i != idx]
+                sim_scores = sim_scores[:top_n]
+                result_indices = [i for i, _ in sim_scores]
+                result_df = df.iloc[result_indices].copy()
+                result_df['cbf_score'] = [s for _, s in sim_scores]
+                result_df['pop_score'] = result_df.apply(popularity_score, axis=1)
+                result_df['score'] = result_df['cbf_score'] * 0.7 + result_df['pop_score'] * 0.3
+                return _to_list(result_df.head(top_n))
+
+    # Popularity-based fallback within filtered set
+    scored = filtered.copy()
+    scored['score'] = scored.apply(popularity_score, axis=1)
+    scored = scored.sort_values('score', ascending=False)
+    return _to_list(scored.head(top_n))
+
+
+# ─── Collaborative Filtering (CF) ───
+def get_cf_recommendations(user_id: str, top_n: int = 10) -> list:
+    """SVD-based CF recommendations. Falls back to popularity if user is cold-start."""
+    if df is None or svd_model is None or interactions_df is None:
+        return []
+
+    all_restaurant_ids = df['restaurant_id'].tolist()
+
+    # Check if user has any interactions in training data
+    if user_id not in interactions_df['user_id'].values:
+        # Cold-start: return popular restaurants
+        scored = df.copy()
+        scored['score'] = scored.apply(popularity_score, axis=1)
+        return _to_list(scored.sort_values('score', ascending=False).head(top_n))
+
+    # Get restaurants already interacted with
+    seen = set(interactions_df[interactions_df['user_id'] == user_id]['restaurant_id'].tolist())
+    unseen = [rid for rid in all_restaurant_ids if rid not in seen]
+
+    # Predict ratings
+    predictions = []
+    for rid in unseen:
+        try:
+            pred = svd_model.predict(user_id, rid)
+            predictions.append((rid, pred.est))
+        except Exception:
+            predictions.append((rid, 3.5))
+
+    predictions.sort(key=lambda x: x[1], reverse=True)
+    top_ids = [rid for rid, _ in predictions[:top_n]]
+    result_df = df[df['restaurant_id'].isin(top_ids)].copy()
+    score_map = {rid: score for rid, score in predictions[:top_n]}
+    result_df['score'] = result_df['restaurant_id'].map(score_map)
+    return _to_list(result_df.sort_values('score', ascending=False))
+
+
+# ─── Hybrid ───
+def get_hybrid_recommendations(
+    user_id: str = None,
+    restaurant_name: str = None,
+    top_n: int = 10,
+    alpha: float = None,
+    live_count: int = 0,
+    cuisines: list = None,
+    area: str = None,
+    price_min: float = None,
+    price_max: float = None,
+    online_order: bool = None,
+    book_table: bool = None,
+) -> list:
+    """Blend CBF + CF with dynamic alpha. Alpha=0 → pure CBF, Alpha=1 → pure CF."""
+    if alpha is None:
+        alpha = get_alpha(live_count)
+
+    cbf = get_cbf_recommendations(
+        restaurant_name=restaurant_name,
+        top_n=top_n * 2,
+        cuisines=cuisines,
+        area=area,
+        price_min=price_min,
+        price_max=price_max,
+        online_order=online_order,
+        book_table=book_table,
+    )
+    cf = get_cf_recommendations(user_id, top_n=top_n * 2) if user_id else []
+
+    # Build score maps
+    cbf_map = {r['restaurant_id']: r.get('score', 0) for r in cbf}
+    cf_map = {r['restaurant_id']: r.get('score', 0) for r in cf}
+
+    all_ids = list(set(cbf_map.keys()) | set(cf_map.keys()))
+
+    # Normalise CF scores (SVD outputs ~0-5, CBF outputs ~0-1)
+    max_cf = max(cf_map.values(), default=1) or 1
+
+    scored = []
+    for rid in all_ids:
+        cbf_s = cbf_map.get(rid, 0)
+        cf_s = cf_map.get(rid, 0) / max_cf
+        hybrid_s = (1 - alpha) * cbf_s + alpha * cf_s
+        scored.append((rid, hybrid_s))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top_ids = [rid for rid, _ in scored[:top_n]]
+    score_map = {rid: s for rid, s in scored[:top_n]}
+
+    result_df = df[df['restaurant_id'].isin(top_ids)].copy()
+    result_df['score'] = result_df['restaurant_id'].map(score_map)
+    return _to_list(result_df.sort_values('score', ascending=False))
+
+
+# ─── Restaurant Scores (for detail page) ───
+def get_restaurant_scores(restaurant_id: int, user_id: str = None, user_preferences: dict = None, live_count: int = 0) -> dict:
+    """Return CBF, CF, and hybrid scores for a single restaurant."""
+    if df is None:
+        return {}
+
+    row = df[df['restaurant_id'] == restaurant_id]
+    if row.empty:
+        return {}
+    row = row.iloc[0]
+
+    # ── CBF Score: preference match ───
+    user_prefs = user_preferences  # unified local alias
+    has_preferences = bool(user_prefs and (user_prefs.get('cuisines') or user_prefs.get('area') or user_prefs.get('price_range')))
+    cbf_score = 0.0
+
+    if has_preferences:
+        score_parts = []
+        # Cuisine match (0-1)
+        pref_cuisines = [c.lower() for c in (user_prefs.get('cuisines') or [])]
+        rest_cuisines = str(row.get('cuisines', '') or '').lower()
+        if pref_cuisines:
+            cuisine_match = any(c in rest_cuisines for c in pref_cuisines)
+            score_parts.append(1.0 if cuisine_match else 0.0)
+        # Area match (0-1)
+        pref_area = (user_prefs.get('area') or '').lower()
+        rest_loc = str(row.get('location', '') or '').lower()
+        if pref_area:
+            score_parts.append(1.0 if pref_area in rest_loc else 0.0)
+        # Price match (0-1)
+        pref_price = user_prefs.get('price_range', '')
+        cost = float(row.get('approx_cost', 0) or 0)
+        if pref_price == '₹' and cost <= 500:
+            score_parts.append(1.0)
+        elif pref_price == '₹₹' and 500 < cost <= 1500:
+            score_parts.append(1.0)
+        elif pref_price == '₹₹₹' and cost > 1500:
+            score_parts.append(1.0)
+        elif pref_price:
+            score_parts.append(0.2)
+        cbf_score = sum(score_parts) / len(score_parts) if score_parts else popularity_score(row)
+    else:
+        cbf_score = popularity_score(row)
+
+    # ── CF Score ───
+    cf_score = 0.0
+    cf_is_personalised = False
+    if user_id and svd_model and interactions_df is not None:
+        try:
+            if user_id in interactions_df['user_id'].values:
+                pred = svd_model.predict(user_id, restaurant_id)
+                cf_score = min(pred.est / 5.0, 1.0)
+                cf_is_personalised = True
+            else:
+                cf_score = popularity_score(row)
+        except Exception:
+            cf_score = popularity_score(row)
+    else:
+        cf_score = popularity_score(row)
+
+    alpha = get_alpha(live_count)
+    hybrid_score = (1 - alpha) * cbf_score + alpha * cf_score
+
+    return {
+        'cbf_score': round(cbf_score, 4),
+        'cf_score': round(cf_score, 4),
+        'hybrid_score': round(hybrid_score, 4),
+        'alpha_used': alpha,
+        'has_preferences': has_preferences,
+        'cf_is_personalised': cf_is_personalised,
+    }
+
+
+# ─── Search / Autocomplete ───
+def search_restaurants(query: str, top_n: int = 8) -> list:
+    """Fuzzy name search for autocomplete."""
+    if df is None or not query:
+        return []
+    q = query.lower().strip()
+    # Direct substring match first
+    mask = df['name'].str.lower().str.contains(q, na=False, regex=False)
+    direct = df[mask].head(top_n)
+    if len(direct) >= top_n:
+        return _to_list(direct)
+    # Fuzzy fallback
+    matches = difflib.get_close_matches(q, all_names_lower, n=top_n, cutoff=0.3)
+    idxs = [name_to_idx[m] for m in matches if m in name_to_idx]
+    fuzzy = df.iloc[idxs] if idxs else pd.DataFrame()
+    combined = pd.concat([direct, fuzzy]).drop_duplicates(subset='restaurant_id').head(top_n)
+    return _to_list(combined)
+
+
+# ─── Admin Controls ───
+_flagged_ids: set = set()
+_excluded_ids: set = set()
+
+
+def flag_restaurant(restaurant_id: int, flagged: bool):
+    if flagged:
+        _flagged_ids.add(restaurant_id)
+    else:
+        _flagged_ids.discard(restaurant_id)
+
+
+def exclude_restaurant(restaurant_id: int, excluded: bool):
+    if excluded:
+        _excluded_ids.add(restaurant_id)
+    else:
+        _excluded_ids.discard(restaurant_id)
+
+
+def update_restaurant(restaurant_id: int, updates: dict) -> bool:
+    global df
+    if df is None:
+        return False
+    mask = df['restaurant_id'] == restaurant_id
+    if not mask.any():
+        return False
+    for key, val in updates.items():
+        if key in df.columns:
+            df.loc[mask, key] = val
+    return True
+
+
+# ─── Helper ───
+def _to_list(frame: pd.DataFrame) -> list:
+    """Convert a DataFrame slice to a JSON-serialisable list of dicts."""
+    if frame is None or frame.empty:
+        return []
+    records = []
+    for _, row in frame.iterrows():
+        r = {}
+        for col in ['restaurant_id', 'name', 'cuisines', 'location', 'rate',
+                    'votes', 'approx_cost', 'online_order', 'book_table',
+                    'rest_type', 'score', 'cbf_score', 'pop_score']:
+            if col in row.index:
+                val = row[col]
+                if isinstance(val, float) and np.isnan(val):
+                    r[col] = None
+                elif hasattr(val, 'item'):
+                    r[col] = val.item()
+                else:
+                    r[col] = val
+        records.append(r)
+    return records
