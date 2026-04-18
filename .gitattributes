@@ -1,2 +1,5 @@
 backend/models/*.npy filter=lfs diff=lfs merge=lfs -text
 backend/models/*.pkl filter=lfs diff=lfs merge=lfs -text
+backend/models/*.parquet filter=lfs diff=lfs merge=lfs -text
+backend/models/*.json filter=lfs diff=lfs merge=lfs -text
+backend/models/*.png filter=lfs diff=lfs merge=lfs -text

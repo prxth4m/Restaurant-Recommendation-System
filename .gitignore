@@ -1,31 +1,50 @@
-# Dependencies
+# ── Python ────────────────────────────────────────────────────
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# ── Secrets ───────────────────────────────────────────────────
 .env
 
-# ML Artefacts: tracked via Git LFS (see .gitattributes)
-# backend/models/*.npy and *.pkl are now managed by Git LFS
+# ── ML Artefacts (tracked via Git LFS — see .gitattributes) ──
+# backend/models/*.npy, *.pkl, *.parquet, *.json managed by LFS
 
-# Data
+# ── Raw Data ──────────────────────────────────────────────────
 *.csv
 *.zip
+dataset/
 
-# IDE
+# ── IDE ───────────────────────────────────────────────────────
 .vscode/
 .idea/
 
-# OS
+# ── OS ────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Stitch local designs (optional — can be large)
-.stitch/designs/*.html
-.stitch/designs/*.png
+# ── Stitch (local design files only) ─────────────────────────
+.stitch/
 
-# Jupyter
+# ── Jupyter ───────────────────────────────────────────────────
 .ipynb_checkpoints/
+notebooks/
 
-# Node
+# ── Node / Next.js ────────────────────────────────────────────
 node_modules/
 .next/
+
+# ── Temporary / dev-only files ────────────────────────────────
+tmp/
+testsprite_tests/
+Requisite knowledge/
+tmp_*.py
+mongodbPing.py
+mongodbSeed.py
+_ul
+task_presentation.md
