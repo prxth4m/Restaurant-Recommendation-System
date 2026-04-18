@@ -24,7 +24,7 @@ function getFoodEmoji(cuisines) {
   return CUISINE_EMOJI[first] || '🍽️';
 }
 
-export default function RestaurantCard({ restaurant, showMoreLike = true }) {
+export default function RestaurantCard({ restaurant, showMoreLike = true, onMoreLike = null }) {
   const r = restaurant;
   const rating = parseFloat(r.rate || r.rating || 0);
   const name = r.name || 'Restaurant';
@@ -75,7 +75,9 @@ export default function RestaurantCard({ restaurant, showMoreLike = true }) {
           {price && <div className="restaurant-card-price">₹{price} for two</div>}
           <div className="restaurant-card-footer">
             {showMoreLike && (
-              <span className="more-like-btn">More Like This →</span>
+              <span className="more-like-btn" onClick={e => {
+                if (onMoreLike) { e.preventDefault(); e.stopPropagation(); onMoreLike(name); }
+              }}>More Like This →</span>
             )}
             <span style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{

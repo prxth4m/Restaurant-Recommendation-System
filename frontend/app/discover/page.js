@@ -271,6 +271,20 @@ function DiscoverContent() {
   const toggleCuisine = (c) =>
     setSelCuisines(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]);
 
+  const handleMoreLike = async (restaurantName) => {
+    setLoading(true); setResults([]);
+    setQuery(restaurantName);
+    setMessage(`Finding restaurants similar to "${restaurantName}"...`);
+    try {
+      const res = await api.recommend({ restaurant_name: restaurantName, technique: 'cbf', top_n: topN });
+      if (res.success) {
+        setResults(res.data || []);
+        setMessage(`${(res.data || []).length} restaurants similar to "${restaurantName}"`);
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
   const getCuisineEmoji = (cuisines) => {
     const c = (cuisines || '').toLowerCase();
     if (c.includes('pizza')) return '🍕';
@@ -524,7 +538,7 @@ function DiscoverContent() {
           {loading
             ? Array.from({ length: 6 }).map((_, i) => <RestaurantCardSkeleton key={i} />)
             : results.length > 0
-              ? results.map((r, i) => <RestaurantCard key={r.restaurant_id ?? r.id ?? `res-${i}`} restaurant={r} />)
+              ? results.map((r, i) => <RestaurantCard key={r.restaurant_id ?? r.id ?? `res-${i}`} restaurant={r} onMoreLike={handleMoreLike} />)
               : !loading && (
                 <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 60 }}>
                   <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
