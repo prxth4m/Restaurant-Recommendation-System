@@ -59,6 +59,16 @@ async def lifespan(app: FastAPI):
     models_dir = os.path.join(os.path.dirname(__file__), 'models')
     recommender.load_models(models_dir)
     await database.connect_db()
+
+    # Auto-retrain SVD with live MongoDB ratings on every startup
+    db_instance = database.get_db()
+    if db_instance is not None:
+        try:
+            msg = await recommender.retrain_svd(db_instance)
+            print(f"[STARTUP] {msg}")
+        except Exception as e:
+            print(f"[WARN] Auto-retrain skipped: {e}")
+
     yield
     await database.close_db()
 
