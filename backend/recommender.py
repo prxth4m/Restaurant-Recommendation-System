@@ -483,3 +483,107 @@ def _to_list(frame: pd.DataFrame) -> list:
                     r[col] = val
         records.append(r)
     return records
+
+
+# ─── SVD Retrain (live) ───
+async def retrain_svd(db) -> str:
+    """
+    Retrain the SVD model using existing training data + live MongoDB interactions.
+    Returns a status message.
+    """
+    global svd_model, interactions_df
+
+    from surprise import Dataset, Reader
+
+    models_dir = os.path.join(os.path.dirname(__file__), 'models')
+
+    # 1. Load existing training data
+    existing_df = pd.read_parquet(os.path.join(models_dir, 'user_interactions.parquet'))
+
+    # 2. Fetch live rated interactions from MongoDB
+    interactions_col = db['interactions']
+    live_ratings = []
+    cursor = interactions_col.find(
+        {"rating": {"$ne": None, "$exists": True}},
+        {"user_id": 1, "restaurant_id": 1, "rating": 1, "_id": 0}
+    )
+    async for doc in cursor:
+        if doc.get('rating') is not None:
+            live_ratings.append({
+                'user_id': str(doc['user_id']),
+                'restaurant_id': str(doc['restaurant_id']),
+                'rating': float(doc['rating']),
+            })
+
+    live_count = len(live_ratings)
+    if live_count == 0:
+        return f"No live ratings found in MongoDB. SVD unchanged ({len(existing_df)} existing rows)."
+
+    # 3. Merge: existing + live (deduplicate, prefer live)
+    live_df = pd.DataFrame(live_ratings)
+    combined = pd.concat([existing_df, live_df], ignore_index=True)
+    # Keep the last occurrence (live overrides existing for same user+restaurant)
+    combined = combined.drop_duplicates(subset=['user_id', 'restaurant_id'], keep='last')
+
+    # Clamp ratings to [1.0, 5.0] for surprise
+    combined['rating'] = combined['rating'].clip(1.0, 5.0)
+
+    # 4. Train new SVD
+    reader = Reader(rating_scale=(1.0, 5.0))
+    surprise_data = Dataset.load_from_df(combined[['user_id', 'restaurant_id', 'rating']], reader)
+    trainset = surprise_data.build_full_trainset()
+
+    new_svd = SVD(n_factors=50, n_epochs=20, lr_all=0.005, reg_all=0.02, random_state=42)
+    new_svd.fit(trainset)
+
+    # 5. Save to disk
+    joblib.dump(new_svd, os.path.join(models_dir, 'svd_model.pkl'))
+    combined.to_parquet(os.path.join(models_dir, 'user_interactions.parquet'), index=False)
+
+    # 6. Hot-reload into memory
+    svd_model = new_svd
+    interactions_df = combined
+
+    msg = (
+        f"SVD retrained successfully. "
+        f"{len(existing_df)} existing + {live_count} live = {len(combined)} total ratings. "
+        f"Unique users: {combined['user_id'].nunique()}, "
+        f"Unique restaurants: {combined['restaurant_id'].nunique()}."
+    )
+    print(f"[OK] {msg}")
+    return msg
+
+
+# ─── Cosine Similarity Rebuild ───
+def rebuild_cosine_sim() -> str:
+    """
+    Rebuild TF-IDF + cosine similarity matrix from the current DataFrame.
+    Returns a status message.
+    """
+    global cosine_sim
+
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    if df is None:
+        return "Cannot rebuild: DataFrame not loaded."
+
+    models_dir = os.path.join(os.path.dirname(__file__), 'models')
+
+    # Build TF-IDF from combined_features column
+    tfidf = TfidfVectorizer(stop_words='english', max_features=5000)
+    tfidf_matrix = tfidf.fit_transform(df['combined_features'].fillna(''))
+
+    # Compute cosine similarity
+    new_cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix).astype(np.float32)
+
+    # Save to disk
+    np.save(os.path.join(models_dir, 'cosine_sim.npy'), new_cosine_sim)
+
+    # Hot-reload into memory
+    cosine_sim = new_cosine_sim
+
+    msg = f"Cosine similarity matrix rebuilt: {new_cosine_sim.shape}. Saved to disk."
+    print(f"[OK] {msg}")
+    return msg
+

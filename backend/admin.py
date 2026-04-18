@@ -96,9 +96,15 @@ async def update_alpha(body: dict, _=Depends(require_admin)):
 
 @router.post("/model/retrain")
 async def trigger_retrain(_=Depends(require_admin)):
-    """Trigger SVD retrain. Returns 202 (queued)."""
-    # In production: launch background task to retrain SVD
-    return {"success": True, "message": "SVD retrain queued. This may take a few minutes."}
+    """Retrain SVD using existing data + live MongoDB interactions."""
+    db_instance = database.get_db()
+    if db_instance is None:
+        return {"success": False, "error": "Database not connected — cannot fetch live interactions."}
+    try:
+        msg = await recommender.retrain_svd(db_instance)
+        return {"success": True, "message": msg}
+    except Exception as e:
+        return {"success": False, "error": f"Retrain failed: {str(e)}"}
 
 
 @router.put("/model/ab-test")
@@ -152,9 +158,12 @@ async def exclude_restaurant(restaurant_id: int, body: dict, _=Depends(require_a
 # ═══════════════════════════════════════════════════════
 @router.post("/pipeline/rebuild")
 async def rebuild_pipeline(_=Depends(require_admin)):
-    """Trigger regeneration of the cosine similarity matrix. Returns 202 (queued)."""
-    # In production: launch background task to rebuild TF-IDF + cosine_sim
-    return {"success": True, "message": "Pipeline rebuild queued. Cosine matrix will be regenerated."}
+    """Rebuild TF-IDF + cosine similarity matrix from current restaurant data."""
+    try:
+        msg = recommender.rebuild_cosine_sim()
+        return {"success": True, "message": msg}
+    except Exception as e:
+        return {"success": False, "error": f"Pipeline rebuild failed: {str(e)}"}
 
 
 # ═══════════════════════════════════════════════════════

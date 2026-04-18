@@ -46,6 +46,11 @@ def get_collection(name: str):
     return db[name]
 
 
+def get_db():
+    """Return the database instance, or None if DB is offline."""
+    return db
+
+
 # ─── Users ───
 async def create_user(email: str, password_hash: str, preferences: dict = None):
     col = get_collection("users")
