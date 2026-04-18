@@ -1,0 +1,31 @@
+# Dependencies
+venv/
+__pycache__/
+*.pyc
+.env
+
+# ML Artefacts: tracked via Git LFS (see .gitattributes)
+# backend/models/*.npy and *.pkl are now managed by Git LFS
+
+# Data
+*.csv
+*.zip
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Stitch local designs (optional — can be large)
+.stitch/designs/*.html
+.stitch/designs/*.png
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+.next/
