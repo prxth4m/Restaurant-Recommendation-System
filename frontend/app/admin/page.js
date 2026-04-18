@@ -53,12 +53,12 @@ export default function AdminPage() {
       ]);
       if (analyticsRes.success) {
         setAnalytics(analyticsRes.data);
-        setAlpha(analyticsRes.data.config?.global_alpha || 0.4);
-        const ab = analyticsRes.data.config?.ab_test_split || {};
-        setAbHybrid(ab.hybrid || 100);
-        setAbCbf(ab.cbf_only || 0);
+        setAlpha(analyticsRes.data.global_alpha ?? 0.4);
+        const ab = analyticsRes.data.ab_test_split || {};
+        setAbHybrid(ab.hybrid ?? 100);
+        setAbCbf(ab.cbf_only ?? 0);
       }
-      if (usersRes.success) setUsers(usersRes.data || []);
+      if (usersRes.success) setUsers(usersRes.data?.users || []);
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -178,7 +178,7 @@ export default function AdminPage() {
             <StatCard label="Total Users" value={a.total_users || 0} icon="👥" />
             <StatCard label="Total Interactions" value={a.total_interactions || 0} icon="📝" color="#4285F4" />
             <StatCard label="Restaurants" value={a.total_restaurants || 9249} icon="🍽️" color="var(--rating-high)" />
-            <StatCard label="Global Alpha" value={(a.config?.global_alpha || 0.4).toFixed(2)} icon="α" color="var(--admin-accent)" />
+            <StatCard label="Global Alpha" value={(a.global_alpha ?? 0.4).toFixed(2)} icon="α" color="var(--admin-accent)" />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -188,12 +188,12 @@ export default function AdminPage() {
             }}>
               <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>A/B Test Split</h3>
               <div style={{ display: 'flex', height: 12, borderRadius: 6, overflow: 'hidden', background: 'var(--bg)', marginBottom: 8 }}>
-                <div style={{ width: `${a.config?.ab_test_split?.hybrid || 100}%`, background: 'var(--primary)', transition: 'width 400ms' }} />
-                <div style={{ width: `${a.config?.ab_test_split?.cbf_only || 0}%`, background: '#4285F4', transition: 'width 400ms' }} />
+                <div style={{ width: `${a.ab_test_split?.hybrid ?? 100}%`, background: 'var(--primary)', transition: 'width 400ms' }} />
+                <div style={{ width: `${a.ab_test_split?.cbf_only ?? 0}%`, background: '#4285F4', transition: 'width 400ms' }} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)' }}>
-                <span>🟠 Hybrid: {a.config?.ab_test_split?.hybrid || 100}%</span>
-                <span>🔵 CBF Only: {a.config?.ab_test_split?.cbf_only || 0}%</span>
+                <span>🟠 Hybrid: {a.ab_test_split?.hybrid ?? 100}%</span>
+                <span>🔵 CBF Only: {a.ab_test_split?.cbf_only ?? 0}%</span>
               </div>
             </div>
             <div style={{
@@ -202,8 +202,8 @@ export default function AdminPage() {
             }}>
               <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Pipeline Status</h3>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
-                <p>Last SVD retrain: <strong>{a.config?.last_svd_retrain || 'Never'}</strong></p>
-                <p>Interactions since retrain: <strong>{a.config?.interactions_since_retrain || 0}</strong></p>
+                <p>Last SVD retrain: <strong>{a.last_svd_retrain || 'Never'}</strong></p>
+                <p>Interactions since retrain: <strong>{a.interactions_since_retrain || 0}</strong></p>
               </div>
             </div>
           </div>
@@ -295,7 +295,7 @@ export default function AdminPage() {
               </thead>
               <tbody>
                 {users.length === 0 ? (
-                  <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>No users found (DB offline)</td></tr>
+                  <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>No users found</td></tr>
                 ) : users.map((u, i) => (
                   <tr key={u._id || i} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '12px 16px' }}>{u.email}</td>

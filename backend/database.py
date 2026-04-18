@@ -51,6 +51,32 @@ def get_db():
     return db
 
 
+# ─── App Config (stored in 'config' collection) ───
+async def get_config() -> dict:
+    """Return the app config document, or defaults if not found."""
+    col = get_collection("config")
+    if col is None:
+        return {}
+    doc = await col.find_one({"key": "app_config"})
+    if doc:
+        doc.pop("_id", None)
+        doc.pop("key", None)
+        return doc
+    return {}
+
+
+async def update_config(updates: dict):
+    """Upsert fields into the app config document."""
+    col = get_collection("config")
+    if col is None:
+        return
+    await col.update_one(
+        {"key": "app_config"},
+        {"$set": updates},
+        upsert=True
+    )
+
+
 # ─── Users ───
 async def create_user(email: str, password_hash: str, preferences: dict = None):
     col = get_collection("users")

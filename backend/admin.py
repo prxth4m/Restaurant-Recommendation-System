@@ -175,12 +175,12 @@ async def get_analytics(_=Depends(require_admin)):
     users_col = database.get_collection("users")
     inter_col = database.get_collection("interactions")
 
-    total_users = await users_col.count_documents({}) if users_col else 0
-    total_interactions = await inter_col.count_documents({}) if inter_col else 0
+    total_users = await users_col.count_documents({}) if users_col is not None else 0
+    total_interactions = await inter_col.count_documents({}) if inter_col is not None else 0
 
     # Cold-start rate: % of users with < 3 interactions
     cold_start_count = 0
-    if users_col and inter_col:
+    if users_col is not None and inter_col is not None:
         all_user_ids = []
         async for u in users_col.find({}, {"_id": 1}):
             all_user_ids.append(str(u["_id"]))
