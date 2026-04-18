@@ -63,6 +63,9 @@ export const api = {
   // ── Search ─────────────────────────────────────────────────
   search: (q) => apiFetch(`/search?q=${encodeURIComponent(q)}`),
 
+  // ── Filter Options ─────────────────────────────────────
+  getFilters: () => apiFetch('/filters'),
+
   // ── Recommendations ────────────────────────────────────────
   recommend: (params = {}) => {
     const qs = new URLSearchParams();

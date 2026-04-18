@@ -5,8 +5,8 @@ import { api, isLoggedIn } from '@/lib/api';
 import { getCurrentUser } from '@/lib/auth';
 import RestaurantCard, { RestaurantCardSkeleton } from '@/components/RestaurantCard';
 
-const CUISINE_OPTIONS = ['North Indian', 'Chinese', 'South Indian', 'Biryani', 'Continental', 'Café', 'Pizza', 'Italian', 'Seafood', 'Street Food'];
-const AREA_OPTIONS = ['Koramangala', 'Indiranagar', 'HSR Layout', 'Jayanagar', 'Whitefield', 'MG Road', 'Marathahalli', 'Electronic City', 'Yelahanka', 'Rajajinagar', 'BTM Layout', 'JP Nagar'];
+// Fallback options (replaced by /filters API on mount)
+const CUISINE_FALLBACK = ['North Indian', 'Chinese', 'South Indian', 'Biryani', 'Continental', 'Café', 'Pizza', 'Italian', 'Seafood', 'Street Food'];
 const TECHNIQUES = [
   { id: 'cbf', label: 'Content-Based' },
   { id: 'cf', label: 'Collaborative' },
@@ -42,8 +42,20 @@ function DiscoverContent() {
   const [selTechnique, setSelTechnique] = useState('hybrid');
   const [topN, setTopN] = useState(12);
 
+  // Dynamic filter options from backend
+  const [allLocations, setAllLocations] = useState([]);
+  const [allCuisines, setAllCuisines] = useState(CUISINE_FALLBACK);
+  const [areaSearch, setAreaSearch] = useState('');
+
   useEffect(() => {
     setUser(getCurrentUser());
+    // Fetch dynamic filter options
+    api.getFilters().then(res => {
+      if (res.success && res.data) {
+        if (res.data.locations?.length) setAllLocations(res.data.locations);
+        if (res.data.cuisines?.length) setAllCuisines(res.data.cuisines);
+      }
+    }).catch(() => {});
     if (initialQ) {
       handleSearch(null, initialQ);
     } else {
@@ -287,8 +299,8 @@ function DiscoverContent() {
           </div>
 
           <label className="input-label" style={{ marginBottom: 8 }}>Cuisines</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
-            {CUISINE_OPTIONS.map(c => (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20, maxHeight: 180, overflowY: 'auto', paddingRight: 4 }}>
+            {allCuisines.map(c => (
               <button key={c} className={`chip${selCuisines.includes(c) ? ' selected' : ''}`}
                 onClick={() => toggleCuisine(c)} style={{ fontSize: 11, padding: '4px 10px' }}>
                 {c}
@@ -297,10 +309,49 @@ function DiscoverContent() {
           </div>
 
           <label className="input-label" style={{ marginBottom: 6 }}>Area</label>
-          <select className="input-field" value={selArea} onChange={e => setSelArea(e.target.value)} style={{ marginBottom: 16, fontSize: 13 }}>
-            <option value="">All Areas</option>
-            {AREA_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
+          <div style={{ position: 'relative', marginBottom: 16 }}>
+            <input
+              type="text"
+              className="input-field"
+              placeholder="Search areas..."
+              value={areaSearch || selArea}
+              onChange={e => { setAreaSearch(e.target.value); setSelArea(''); }}
+              onFocus={() => setAreaSearch(selArea || '')}
+              style={{ fontSize: 13 }}
+            />
+            {areaSearch !== '' && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: '0 0 8px 8px', maxHeight: 200, overflowY: 'auto',
+                boxShadow: 'var(--shadow-card)'
+              }}>
+                <div
+                  style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)' }}
+                  onClick={() => { setSelArea(''); setAreaSearch(''); }}
+                >
+                  All Areas
+                </div>
+                {allLocations
+                  .filter(a => a.toLowerCase().includes(areaSearch.toLowerCase()))
+                  .slice(0, 20)
+                  .map(a => (
+                    <div key={a}
+                      style={{
+                        padding: '8px 12px', fontSize: 12, cursor: 'pointer',
+                        background: selArea === a ? 'var(--primary-light)' : 'transparent',
+                      }}
+                      onMouseEnter={e => e.target.style.background = 'var(--primary-light)'}
+                      onMouseLeave={e => e.target.style.background = selArea === a ? 'var(--primary-light)' : 'transparent'}
+                      onClick={() => { setSelArea(a); setAreaSearch(''); }}
+                    >
+                      {a}
+                    </div>
+                  ))
+                }
+              </div>
+            )}
+          </div>
 
           <label className="input-label" style={{ marginBottom: 6 }}>Price Range</label>
           <select className="input-field" value={selPrice} onChange={e => setSelPrice(e.target.value)} style={{ marginBottom: 20, fontSize: 13 }}>

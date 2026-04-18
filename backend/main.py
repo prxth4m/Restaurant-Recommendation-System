@@ -151,6 +151,30 @@ async def search(request: Request, q: str = Query(..., min_length=1), top_n: int
 
 
 # ═══════════════════════════════════════════════════════
+# FILTER OPTIONS (dynamic from dataset)
+# ═══════════════════════════════════════════════════════
+@app.get("/filters")
+async def get_filter_options():
+    """Return all unique locations and cuisines from the dataset for filter dropdowns."""
+    if recommender.df is None:
+        return {"success": True, "data": {"locations": [], "cuisines": []}}
+
+    # Unique locations, sorted
+    locations = sorted(recommender.df['location'].dropna().unique().tolist())
+
+    # Unique individual cuisines (each row has comma-separated cuisines)
+    cuisine_set = set()
+    for val in recommender.df['cuisines'].dropna():
+        for c in val.split(','):
+            c = c.strip()
+            if c:
+                cuisine_set.add(c)
+    cuisines = sorted(cuisine_set)
+
+    return {"success": True, "data": {"locations": locations, "cuisines": cuisines}}
+
+
+# ═══════════════════════════════════════════════════════
 # RECOMMEND
 # ═══════════════════════════════════════════════════════
 @app.get("/recommend")
