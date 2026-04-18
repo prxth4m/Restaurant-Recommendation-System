@@ -158,20 +158,21 @@ async def recommend(
 
     data = []
     for _, row in recs.iterrows():
+        rd = row.to_dict()
         data.append({
-            "restaurant_id": int(row.get("restaurant_id", 0)),
-            "name": row.get("name", ""),
-            "cuisines": row.get("cuisines", ""),
-            "location": row.get("location", ""),
-            "rate": float(row.get("rate", 0)),
-            "votes": int(row.get("votes", 0)),
-            "approx_cost": int(row.get("cost_for_two", row.get("approx_cost", 0))),
-            "online_order": int(row.get("online_order", 0)),
-            "book_table": int(row.get("book_table", 0)),
-            "rest_type": row.get("rest_type", ""),
-            "recommendation_score": float(row.get("recommendation_score", 0)),
-            "technique_used": row.get("technique_used", ""),
-            "alpha_used": float(row.get("alpha_used", 0))
+            "restaurant_id": int(rd.get("restaurant_id", 0)),
+            "name": rd.get("name", ""),
+            "cuisines": rd.get("cuisines", ""),
+            "location": rd.get("location", ""),
+            "rate": float(rd.get("rate", 0)),
+            "votes": int(rd.get("votes", 0)),
+            "approx_cost": int(rd.get("cost_for_two", rd.get("approx_cost", 0)) or 0),
+            "online_order": int(rd.get("online_order", 0)),
+            "book_table": int(rd.get("book_table", 0)),
+            "rest_type": rd.get("rest_type", ""),
+            "recommendation_score": float(rd.get("recommendation_score", 0)),
+            "technique_used": rd.get("technique_used", ""),
+            "alpha_used": float(rd.get("alpha_used", 0))
         })
 
     return {"success": True, "data": data, "message": f"{len(data)} recommendations"}

@@ -1,5 +1,6 @@
 # backend/database.py — MongoDB async client via Motor
 import os
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 
@@ -15,7 +16,11 @@ async def connect_db():
     mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
     db_name = os.getenv("DB_NAME", "goodspot")
     try:
-        client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
+        client = AsyncIOMotorClient(
+            mongo_url,
+            serverSelectionTimeoutMS=5000,
+            tlsCAFile=certifi.where()     # Atlas needs valid CA bundle
+        )
         db = client[db_name]
         # Quick ping to verify connection
         await client.admin.command('ping')

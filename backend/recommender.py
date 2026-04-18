@@ -83,9 +83,9 @@ def get_cbf_recommendations(
     if area:
         filtered = filtered[filtered['location'].str.lower().str.contains(area.lower(), na=False)]
     if price_min is not None:
-        filtered = filtered[filtered['approx_cost'] >= price_min]
+        filtered = filtered[filtered['cost_for_two'] >= price_min]
     if price_max is not None:
-        filtered = filtered[filtered['approx_cost'] <= price_max]
+        filtered = filtered[filtered['cost_for_two'] <= price_max]
     if online_order is not None:
         filtered = filtered[filtered['online_order'] == (1 if online_order else 0)]
     if book_table is not None:
@@ -212,14 +212,14 @@ def get_hybrid_recommendations(
 
 
 # ─── Restaurant Scores (for detail page) ───
-def get_restaurant_scores(restaurant_id: int, user_id: str = None, user_preferences: dict = None, live_count: int = 0) -> dict:
-    """Return CBF, CF, and hybrid scores for a single restaurant."""
+def get_restaurant_scores(restaurant_id: int, user_id: str = None, user_preferences: dict = None, live_count: int = 0):
+    """Return (scores_dict, error_string | None) for a single restaurant."""
     if df is None:
-        return {}
+        return {}, "Models not loaded"
 
     row = df[df['restaurant_id'] == restaurant_id]
     if row.empty:
-        return {}
+        return {}, "Restaurant not found"
     row = row.iloc[0]
 
     # ── CBF Score: preference match ───
@@ -242,7 +242,7 @@ def get_restaurant_scores(restaurant_id: int, user_id: str = None, user_preferen
             score_parts.append(1.0 if pref_area in rest_loc else 0.0)
         # Price match (0-1)
         pref_price = user_prefs.get('price_range', '')
-        cost = float(row.get('approx_cost', 0) or 0)
+        cost = float(row.get('cost_for_two', 0) or 0)
         if pref_price == '₹' and cost <= 500:
             score_parts.append(1.0)
         elif pref_price == '₹₹' and 500 < cost <= 1500:
@@ -271,10 +271,10 @@ def get_restaurant_scores(restaurant_id: int, user_id: str = None, user_preferen
     else:
         cf_score = popularity_score(row)
 
-    alpha = get_alpha(live_count)
+    alpha = get_alpha(live_count or 0)
     hybrid_score = (1 - alpha) * cbf_score + alpha * cf_score
 
-    return {
+    scores = {
         'cbf_score': round(cbf_score, 4),
         'cf_score': round(cf_score, 4),
         'hybrid_score': round(hybrid_score, 4),
@@ -282,6 +282,7 @@ def get_restaurant_scores(restaurant_id: int, user_id: str = None, user_preferen
         'has_preferences': has_preferences,
         'cf_is_personalised': cf_is_personalised,
     }
+    return scores, None
 
 
 # ─── Search / Autocomplete ───
@@ -302,6 +303,132 @@ def search_restaurants(query: str, top_n: int = 8) -> list:
     combined = pd.concat([direct, fuzzy]).drop_duplicates(subset='restaurant_id').head(top_n)
     return _to_list(combined)
 
+
+# Alias used by main.py
+fuzzy_search = search_restaurants
+
+
+# ─── Unified Recommendation Dispatch ───
+def get_recommendations(
+    user_id: str = None,
+    restaurant_name: str = None,
+    location: str = None,
+    technique: str = "hybrid",
+    alpha: float = None,
+    top_n: int = 10,
+    cuisines: str = None,
+    price_min: int = 0,
+    price_max: int = 3000,
+    min_rating: float = 0.0,
+    live_count: int = None,
+):
+    """
+    Dispatch to CBF / CF / Hybrid based on 'technique'.
+    Returns (DataFrame, error_string | None).
+    """
+    if df is None:
+        return pd.DataFrame(), "Models not loaded"
+
+    cuisine_list = [c.strip() for c in cuisines.split(",")] if cuisines else None
+    area = location
+
+    try:
+        if technique == "cbf":
+            recs_list = get_cbf_recommendations(
+                restaurant_name=restaurant_name,
+                top_n=top_n,
+                cuisines=cuisine_list,
+                area=area,
+                price_min=price_min,
+                price_max=price_max,
+            )
+        elif technique == "cf":
+            recs_list = get_cf_recommendations(user_id, top_n=top_n)
+        else:
+            # "hybrid" (default)
+            recs_list = get_hybrid_recommendations(
+                user_id=user_id,
+                restaurant_name=restaurant_name,
+                top_n=top_n,
+                alpha=alpha,
+                live_count=live_count or 0,
+                cuisines=cuisine_list,
+                area=area,
+                price_min=price_min,
+                price_max=price_max,
+            )
+    except Exception as e:
+        return pd.DataFrame(), str(e)
+
+    if not recs_list:
+        return pd.DataFrame(), None
+
+    result_df = pd.DataFrame(recs_list)
+
+    # Apply min_rating filter
+    if min_rating and 'rate' in result_df.columns:
+        result_df = result_df[result_df['rate'] >= min_rating]
+
+    # Add metadata columns expected by main.py
+    result_df['recommendation_score'] = result_df['score'] if 'score' in result_df.columns else 0
+    result_df['technique_used'] = technique
+    result_df['alpha_used'] = alpha if alpha is not None else get_alpha(live_count or 0)
+
+    return result_df, None
+
+
+# ─── Group Recommendations ───
+def get_group_recommendations(members: list, top_n: int = 10):
+    """
+    Generate recommendations for a group by blending each member's CBF results.
+    members: list of dicts with optional keys: cuisines, price_range, area
+    Returns (DataFrame, error_string | None).
+    """
+    if df is None:
+        return pd.DataFrame(), "Models not loaded"
+
+    if not members or len(members) < 2:
+        return pd.DataFrame(), "At least 2 group members required"
+
+    all_scores = {}
+    for member in members:
+        cuisine_list = None
+        if member.get("cuisines"):
+            raw = member["cuisines"]
+            cuisine_list = [c.strip() for c in raw.split(",")] if isinstance(raw, str) else raw
+
+        area = member.get("area", "")
+
+        member_recs = get_cbf_recommendations(
+            top_n=top_n * 3,
+            cuisines=cuisine_list,
+            area=area,
+        )
+
+        for rec in member_recs:
+            rid = rec.get("restaurant_id")
+            if rid not in all_scores:
+                all_scores[rid] = []
+            all_scores[rid].append(rec.get("score", 0))
+
+    # Aggregate: average score across members, weighted by how many members matched
+    scored = []
+    for rid, scores in all_scores.items():
+        avg_score = sum(scores) / len(members)
+        coverage = len(scores) / len(members)
+        group_score = avg_score * 0.6 + coverage * 0.4
+        scored.append((rid, group_score))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top_ids = [rid for rid, _ in scored[:top_n]]
+    score_map = {rid: s for rid, s in scored[:top_n]}
+
+    result_df = df[df['restaurant_id'].isin(top_ids)].copy()
+    result_df['group_score'] = result_df['restaurant_id'].map(score_map)
+    result_df['num_members'] = len(members)
+    result_df = result_df.sort_values('group_score', ascending=False)
+
+    return result_df, None
 
 # ─── Admin Controls ───
 _flagged_ids: set = set()
@@ -344,7 +471,7 @@ def _to_list(frame: pd.DataFrame) -> list:
     for _, row in frame.iterrows():
         r = {}
         for col in ['restaurant_id', 'name', 'cuisines', 'location', 'rate',
-                    'votes', 'approx_cost', 'online_order', 'book_table',
+                    'votes', 'cost_for_two', 'online_order', 'book_table',
                     'rest_type', 'score', 'cbf_score', 'pop_score']:
             if col in row.index:
                 val = row[col]
