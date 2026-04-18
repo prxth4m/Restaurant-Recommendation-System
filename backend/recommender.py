@@ -220,7 +220,7 @@ def get_restaurant_scores(restaurant_id: int, user_id: str = None, user_preferen
     row = df[df['restaurant_id'] == restaurant_id]
     if row.empty:
         return {}, "Restaurant not found"
-    row = row.iloc[0]
+    row = row.iloc[0].to_dict()
 
     # ── CBF Score: preference match ───
     user_prefs = user_preferences  # unified local alias
@@ -424,7 +424,7 @@ def get_group_recommendations(members: list, top_n: int = 10):
     score_map = {rid: s for rid, s in scored[:top_n]}
 
     result_df = df[df['restaurant_id'].isin(top_ids)].copy()
-    result_df['group_score'] = result_df['restaurant_id'].map(score_map)
+    result_df['group_score'] = result_df['restaurant_id'].map(score_map).fillna(0)
     result_df['num_members'] = len(members)
     result_df = result_df.sort_values('group_score', ascending=False)
 

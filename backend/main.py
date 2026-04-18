@@ -1,5 +1,6 @@
 # backend/main.py — FastAPI application entry point
 import os
+import math
 from contextlib import asynccontextmanager
 
 # Load .env before anything else
@@ -25,6 +26,31 @@ from backend.schemas import (
     PreferencesUpdate, GroupRequest
 )
 from backend.admin import router as admin_router
+
+
+# ─── NaN-safe conversion helpers ───
+def _safe_int(val, default=0):
+    """Convert to int, returning default for None/NaN/invalid."""
+    if val is None:
+        return default
+    if isinstance(val, float) and math.isnan(val):
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(val, default=0.0):
+    """Convert to float, returning default for None/NaN/invalid."""
+    if val is None:
+        return default
+    if isinstance(val, float) and math.isnan(val):
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
 
 
 # ─── Lifespan: load models at startup, close DB at shutdown ───
@@ -160,19 +186,19 @@ async def recommend(
     for _, row in recs.iterrows():
         rd = row.to_dict()
         data.append({
-            "restaurant_id": int(rd.get("restaurant_id", 0)),
-            "name": rd.get("name", ""),
-            "cuisines": rd.get("cuisines", ""),
-            "location": rd.get("location", ""),
-            "rate": float(rd.get("rate", 0)),
-            "votes": int(rd.get("votes", 0)),
-            "approx_cost": int(rd.get("cost_for_two", rd.get("approx_cost", 0)) or 0),
-            "online_order": int(rd.get("online_order", 0)),
-            "book_table": int(rd.get("book_table", 0)),
-            "rest_type": rd.get("rest_type", ""),
-            "recommendation_score": float(rd.get("recommendation_score", 0)),
-            "technique_used": rd.get("technique_used", ""),
-            "alpha_used": float(rd.get("alpha_used", 0))
+            "restaurant_id": _safe_int(rd.get("restaurant_id", 0)),
+            "name": rd.get("name", "") or "",
+            "cuisines": rd.get("cuisines", "") or "",
+            "location": rd.get("location", "") or "",
+            "rate": _safe_float(rd.get("rate", 0)),
+            "votes": _safe_int(rd.get("votes", 0)),
+            "approx_cost": _safe_int(rd.get("cost_for_two", rd.get("approx_cost", 0))),
+            "online_order": _safe_int(rd.get("online_order", 0)),
+            "book_table": _safe_int(rd.get("book_table", 0)),
+            "rest_type": rd.get("rest_type", "") or "",
+            "recommendation_score": _safe_float(rd.get("recommendation_score", 0)),
+            "technique_used": rd.get("technique_used", "") or "",
+            "alpha_used": _safe_float(rd.get("alpha_used", 0))
         })
 
     return {"success": True, "data": data, "message": f"{len(data)} recommendations"}
@@ -183,7 +209,7 @@ async def recommend(
 # ═══════════════════════════════════════════════════════
 @app.post("/recommend-group")
 async def recommend_group(body: GroupRequest):
-    members = [m.dict() for m in body.members]
+    members = [m.model_dump() for m in body.members]
     recs, err = recommender.get_group_recommendations(members, top_n=body.top_n)
 
     if err:
@@ -191,15 +217,16 @@ async def recommend_group(body: GroupRequest):
 
     data = []
     for _, row in recs.iterrows():
+        rd = row.to_dict()
         data.append({
-            "restaurant_id": int(row.get("restaurant_id", 0)),
-            "name": row.get("name", ""),
-            "cuisines": row.get("cuisines", ""),
-            "location": row.get("location", ""),
-            "rate": float(row.get("rate", 0)),
-            "votes": int(row.get("votes", 0)),
-            "group_score": float(row.get("group_score", 0)),
-            "num_members": int(row.get("num_members", 0))
+            "restaurant_id": _safe_int(rd.get("restaurant_id", 0)),
+            "name": rd.get("name", "") or "",
+            "cuisines": rd.get("cuisines", "") or "",
+            "location": rd.get("location", "") or "",
+            "rate": _safe_float(rd.get("rate", 0)),
+            "votes": _safe_int(rd.get("votes", 0)),
+            "group_score": _safe_float(rd.get("group_score", 0)),
+            "num_members": _safe_int(rd.get("num_members", 0))
         })
 
     return {"success": True, "data": data, "message": f"{len(data)} group recommendations"}
@@ -210,21 +237,21 @@ async def recommend_group(body: GroupRequest):
 # ═══════════════════════════════════════════════════════
 @app.get("/restaurant/{restaurant_id}")
 async def get_restaurant(restaurant_id: int):
-    if recommender.df is None or restaurant_id >= len(recommender.df):
+    if recommender.df is None or restaurant_id < 0 or restaurant_id >= len(recommender.df):
         return {"success": False, "error": "Restaurant not found"}
 
-    row = recommender.df.iloc[restaurant_id]
+    rd = recommender.df.iloc[restaurant_id].to_dict()
     data = {
         "restaurant_id": restaurant_id,
-        "name": row.get("name", ""),
-        "cuisines": row.get("cuisines", ""),
-        "location": row.get("location", ""),
-        "rate": float(row.get("rate", 0)),
-        "votes": int(row.get("votes", 0)),
-        "approx_cost": int(row.get("cost_for_two", row.get("approx_cost", 0))),
-        "online_order": int(row.get("online_order", 0)),
-        "book_table": int(row.get("book_table", 0)),
-        "rest_type": row.get("rest_type", ""),
+        "name": rd.get("name", "") or "",
+        "cuisines": rd.get("cuisines", "") or "",
+        "location": rd.get("location", "") or "",
+        "rate": _safe_float(rd.get("rate", 0)),
+        "votes": _safe_int(rd.get("votes", 0)),
+        "approx_cost": _safe_int(rd.get("cost_for_two", 0)),
+        "online_order": _safe_int(rd.get("online_order", 0)),
+        "book_table": _safe_int(rd.get("book_table", 0)),
+        "rest_type": rd.get("rest_type", "") or "",
     }
     return {"success": True, "data": data}
 

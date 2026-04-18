@@ -119,7 +119,7 @@ async def update_ab_test(body: dict, _=Depends(require_admin)):
 @router.patch("/restaurants/{restaurant_id}")
 async def edit_restaurant(restaurant_id: int, body: dict, _=Depends(require_admin)):
     """Edit restaurant metadata (name, cuisines, location, etc.)."""
-    allowed_fields = {"name", "cuisines", "location", "rest_type", "rate", "votes", "approx_cost"}
+    allowed_fields = {"name", "cuisines", "location", "rest_type", "rate", "votes", "cost_for_two"}
     updates = {k: v for k, v in body.items() if k in allowed_fields}
     if not updates:
         return {"success": False, "error": f"No valid fields to update. Allowed: {allowed_fields}"}
