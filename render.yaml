@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: goodspot-backend
+    runtime: python
+    region: oregon  # or singapore if your users are in India
+    plan: free       # change to starter for production
+    rootDir: .
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+
+    envVars:
+      # ── JWT ───────────────────────────────────────────────────
+      - key: JWT_SECRET
+        generateValue: true   # Render auto-generates a strong secret
+
+      # ── MongoDB Atlas ─────────────────────────────────────────
+      - key: MONGO_URL
+        sync: false           # Set manually in Render dashboard
+      - key: DB_NAME
+        value: goodspot
+
+      # ── Google OAuth2 ─────────────────────────────────────────
+      # After deploy, replace <RENDER_URL> with your actual Render URL
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://<YOUR_RENDER_URL>/auth/google/callback
+
+      # ── Frontend URL ──────────────────────────────────────────
+      # Set this to your Vercel deployment URL
+      - key: FRONTEND_URL
+        value: https://<YOUR_VERCEL_URL>
+
+      # ── CORS ─────────────────────────────────────────────────
+      # Comma-separated list of allowed frontend origins
+      - key: ALLOWED_ORIGINS
+        value: https://<YOUR_VERCEL_URL>
+
+      # ── Email (Forgot Password) ───────────────────────────────
+      - key: SMTP_EMAIL
+        sync: false
+      - key: SMTP_APP_PASSWORD
+        sync: false
