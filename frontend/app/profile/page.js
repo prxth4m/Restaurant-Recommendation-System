@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, isLoggedIn } from '@/lib/api';
@@ -22,10 +22,29 @@ export default function ProfilePage() {
   const [editPrice, setEditPrice] = useState('₹₹');
   const [editArea, setEditArea] = useState('');
 
+  // Searchable area combobox state
+  const [allLocations, setAllLocations] = useState([]);
+  const [areaSearch, setAreaSearch] = useState('');
+  const [areaOpen, setAreaOpen] = useState(false);
+  const areaRef = useRef(null);
+
   useEffect(() => {
     if (!isLoggedIn()) { router.push('/login'); return; }
     setUser(getCurrentUser());
     loadProfile();
+    // Fetch dynamic area options
+    api.getFilters().then(res => {
+      if (res.success && res.data?.locations?.length) setAllLocations(res.data.locations);
+    }).catch(() => {});
+  }, []);
+
+  // Close area dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (areaRef.current && !areaRef.current.contains(e.target)) setAreaOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const loadProfile = async () => {
@@ -165,7 +184,55 @@ export default function ProfilePage() {
               </div>
               <div style={{ flex: 1 }}>
                 <label className="input-label" style={{ marginBottom: 6 }}>Preferred Area</label>
-                <input className="input-field" value={editArea} onChange={e => setEditArea(e.target.value)} placeholder="Koramangala" />
+                <div ref={areaRef} style={{ position: 'relative' }}>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Search areas..."
+                      value={areaOpen ? areaSearch : (editArea || '')}
+                      onChange={e => { setAreaSearch(e.target.value); setEditArea(''); setAreaOpen(true); }}
+                      onFocus={() => { setAreaOpen(true); setAreaSearch(''); }}
+                      style={{ fontSize: 13, paddingRight: editArea ? 30 : 12 }}
+                    />
+                    {editArea && !areaOpen && (
+                      <button
+                        onClick={() => { setEditArea(''); setAreaSearch(''); }}
+                        style={{
+                          position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                          background: 'none', border: 'none', cursor: 'pointer', fontSize: 14,
+                          color: 'var(--text-muted)', padding: 0, lineHeight: 1
+                        }}
+                      >✕</button>
+                    )}
+                  </div>
+                  {areaOpen && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                      background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: '0 0 8px 8px', maxHeight: 180, overflowY: 'auto',
+                      boxShadow: 'var(--shadow-card)'
+                    }}>
+                      {allLocations
+                        .filter(a => !areaSearch || a.toLowerCase().includes(areaSearch.toLowerCase()))
+                        .map(a => (
+                          <div key={a}
+                            style={{
+                              padding: '8px 12px', fontSize: 12, cursor: 'pointer',
+                              background: editArea === a ? 'var(--primary-light)' : 'transparent',
+                              fontWeight: editArea === a ? 600 : 400,
+                            }}
+                            onMouseEnter={e => e.target.style.background = 'var(--primary-light)'}
+                            onMouseLeave={e => e.target.style.background = editArea === a ? 'var(--primary-light)' : 'transparent'}
+                            onClick={() => { setEditArea(a); setAreaSearch(''); setAreaOpen(false); }}
+                          >
+                            {a}
+                          </div>
+                        ))
+                      }
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, setToken } from '@/lib/api';
@@ -19,7 +19,7 @@ function GoogleIcon() {
 
 // ── Onboarding Quiz (Step 2) ──────────────────────────────────
 const CUISINES = ['North Indian', 'Chinese', 'South Indian', 'Biryani', 'Continental', 'Café', 'Pizza', 'Others'];
-const AREAS = ['Koramangala', 'Indiranagar', 'HSR Layout', 'Jayanagar', 'Whitefield', 'MG Road', 'Marathahalli', 'Electronic City', 'Yelahanka', 'Rajajinagar'];
+const AREAS_FALLBACK = ['Koramangala', 'Indiranagar', 'HSR Layout', 'Jayanagar', 'Whitefield', 'MG Road', 'Marathahalli', 'Electronic City', 'Yelahanka', 'Rajajinagar'];
 const PRICES = [
   { id: '₹', symbol: '₹', label: 'Under ₹500' },
   { id: '₹₹', symbol: '₹₹', label: '₹500–₹1,500' },
@@ -29,9 +29,30 @@ const PRICES = [
 function OnboardingQuiz({ onComplete }) {
   const [cuisines, setCuisines] = useState([]);
   const [price, setPrice] = useState('₹₹');
-  const [area, setArea] = useState('Koramangala');
+  const [area, setArea] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Searchable area combobox state
+  const [allLocations, setAllLocations] = useState(AREAS_FALLBACK);
+  const [areaSearch, setAreaSearch] = useState('');
+  const [areaOpen, setAreaOpen] = useState(false);
+  const areaRef = useRef(null);
+
+  useEffect(() => {
+    api.getFilters().then(res => {
+      if (res.success && res.data?.locations?.length) setAllLocations(res.data.locations);
+    }).catch(() => {});
+  }, []);
+
+  // Close area dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (areaRef.current && !areaRef.current.contains(e.target)) setAreaOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const toggleCuisine = (c) =>
     setCuisines(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]);
@@ -87,16 +108,57 @@ function OnboardingQuiz({ onComplete }) {
         ))}
       </div>
 
-      {/* Area */}
+      {/* Area — searchable combobox */}
       <label className="input-label" style={{ marginBottom: 6 }}>Which area of Bangalore do you mostly eat in?</label>
-      <select
-        value={area}
-        onChange={e => setArea(e.target.value)}
-        className="input-field"
-        style={{ marginBottom: 24 }}
-      >
-        {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-      </select>
+      <div ref={areaRef} style={{ position: 'relative', marginBottom: 24 }}>
+        <div style={{ position: 'relative' }}>
+          <input
+            type="text"
+            className="input-field"
+            placeholder="Search areas..."
+            value={areaOpen ? areaSearch : (area || '')}
+            onChange={e => { setAreaSearch(e.target.value); setArea(''); setAreaOpen(true); }}
+            onFocus={() => { setAreaOpen(true); setAreaSearch(''); }}
+            style={{ fontSize: 14, paddingRight: area ? 30 : 12 }}
+          />
+          {area && !areaOpen && (
+            <button
+              onClick={() => { setArea(''); setAreaSearch(''); }}
+              style={{
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 14,
+                color: 'var(--text-muted)', padding: 0, lineHeight: 1
+              }}
+            >✕</button>
+          )}
+        </div>
+        {areaOpen && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: '0 0 8px 8px', maxHeight: 180, overflowY: 'auto',
+            boxShadow: 'var(--shadow-card)'
+          }}>
+            {allLocations
+              .filter(a => !areaSearch || a.toLowerCase().includes(areaSearch.toLowerCase()))
+              .map(a => (
+                <div key={a}
+                  style={{
+                    padding: '8px 12px', fontSize: 13, cursor: 'pointer',
+                    background: area === a ? 'var(--primary-light)' : 'transparent',
+                    fontWeight: area === a ? 600 : 400,
+                  }}
+                  onMouseEnter={e => e.target.style.background = 'var(--primary-light)'}
+                  onMouseLeave={e => e.target.style.background = area === a ? 'var(--primary-light)' : 'transparent'}
+                  onClick={() => { setArea(a); setAreaSearch(''); setAreaOpen(false); }}
+                >
+                  {a}
+                </div>
+              ))
+            }
+          </div>
+        )}
+      </div>
 
       {error && <p style={{ color: 'var(--rating-low)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
 
