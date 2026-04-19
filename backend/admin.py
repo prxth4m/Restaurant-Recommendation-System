@@ -158,9 +158,9 @@ async def exclude_restaurant(restaurant_id: int, body: dict, _=Depends(require_a
 # ═══════════════════════════════════════════════════════
 @router.post("/pipeline/rebuild")
 async def rebuild_pipeline(_=Depends(require_admin)):
-    """Rebuild TF-IDF + cosine similarity matrix from current restaurant data."""
+    """Rebuild TF-IDF sparse matrix from current restaurant data."""
     try:
-        msg = recommender.rebuild_cosine_sim()
+        msg = recommender.rebuild_tfidf_matrix()
         return {"success": True, "message": msg}
     except Exception as e:
         return {"success": False, "error": f"Pipeline rebuild failed: {str(e)}"}

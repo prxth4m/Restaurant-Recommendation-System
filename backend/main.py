@@ -107,7 +107,7 @@ app.include_router(admin_router)
 async def health():
     return {"success": True, "message": "GoodSpot API is running", "data": {
         "restaurants_loaded": len(recommender.df) if recommender.df is not None else 0,
-        "models_ready": recommender.cosine_sim is not None and recommender.svd_model is not None
+        "models_ready": recommender.tfidf_matrix is not None and recommender.svd_model is not None
     }}
 
 # ═══════════════════════════════════════════════════════

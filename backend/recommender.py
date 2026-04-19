@@ -6,10 +6,12 @@ import json
 import difflib
 import os
 from surprise import SVD
+from sklearn.metrics.pairwise import linear_kernel
 
 # ─── Globals (populated by load_models) ───
 df = None
-cosine_sim = None
+tfidf_matrix = None          # sparse TF-IDF matrix (~0.5 MB vs 326 MB dense cosine_sim)
+tfidf_vectorizer = None      # fitted vectorizer for on-the-fly transforms
 svd_model = None
 interactions_df = None
 name_to_idx = None
@@ -19,13 +21,16 @@ max_log_votes = 1.0
 
 def load_models(models_dir: str):
     """Load all ML artefacts into memory. Called once at FastAPI startup."""
-    global df, cosine_sim, svd_model, interactions_df
+    global df, tfidf_matrix, tfidf_vectorizer, svd_model, interactions_df
     global name_to_idx, all_names_lower, max_log_votes
 
     df = pd.read_parquet(os.path.join(models_dir, 'zomato_clean.parquet'))
     df['restaurant_id'] = df.index
 
-    cosine_sim = np.load(os.path.join(models_dir, 'cosine_sim.npy'))
+    # Load TF-IDF vectorizer and build sparse matrix on startup (~0.5 MB)
+    tfidf_vectorizer = joblib.load(os.path.join(models_dir, 'tfidf_vectoriser.pkl'))
+    tfidf_matrix = tfidf_vectorizer.transform(df['combined_features'].fillna(''))
+
     svd_model = joblib.load(os.path.join(models_dir, 'svd_model.pkl'))
     interactions_df = pd.read_parquet(os.path.join(models_dir, 'user_interactions.parquet'))
 
@@ -35,7 +40,7 @@ def load_models(models_dir: str):
         all_names_lower = data['all_names_lower']
 
     max_log_votes = np.log1p(df['votes'].max())
-    print(f"[OK] Models loaded: {len(df)} restaurants, cosine {cosine_sim.shape}")
+    print(f"[OK] Models loaded: {len(df)} restaurants, tfidf_matrix {tfidf_matrix.shape} ({tfidf_matrix.data.nbytes / 1024**2:.1f} MB sparse)")
 
 
 # ─── Alpha Ramping ───
@@ -99,8 +104,10 @@ def get_cbf_recommendations(
         matches = difflib.get_close_matches(restaurant_name.lower(), all_names_lower, n=1, cutoff=0.4)
         if matches:
             idx = name_to_idx.get(matches[0])
-            if idx is not None and cosine_sim is not None:
-                sim_scores = list(enumerate(cosine_sim[idx]))
+            if idx is not None and tfidf_matrix is not None:
+                # Compute cosine similarity on-the-fly (identical math, ~0 extra RAM)
+                sim_row = linear_kernel(tfidf_matrix[idx:idx+1], tfidf_matrix).flatten()
+                sim_scores = list(enumerate(sim_row))
                 sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
                 # Filter to only indices in our filtered df
                 filtered_indices = set(filtered.index.tolist())
@@ -581,16 +588,17 @@ async def retrain_svd(db) -> str:
     return msg
 
 
-# ─── Cosine Similarity Rebuild ───
-def rebuild_cosine_sim() -> str:
+# ─── TF-IDF Matrix Rebuild ───
+def rebuild_tfidf_matrix() -> str:
     """
-    Rebuild TF-IDF + cosine similarity matrix from the current DataFrame.
+    Rebuild TF-IDF sparse matrix from the current DataFrame.
+    This replaces the old rebuild_cosine_sim (which created a 326 MB dense matrix).
+    The new sparse matrix is ~0.5 MB and similarities are computed on-the-fly.
     Returns a status message.
     """
-    global cosine_sim
+    global tfidf_matrix, tfidf_vectorizer
 
     from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
 
     if df is None:
         return "Cannot rebuild: DataFrame not loaded."
@@ -598,19 +606,13 @@ def rebuild_cosine_sim() -> str:
     models_dir = os.path.join(os.path.dirname(__file__), 'models')
 
     # Build TF-IDF from combined_features column
-    tfidf = TfidfVectorizer(stop_words='english', max_features=5000)
-    tfidf_matrix = tfidf.fit_transform(df['combined_features'].fillna(''))
+    tfidf_vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
+    tfidf_matrix = tfidf_vectorizer.fit_transform(df['combined_features'].fillna(''))
 
-    # Compute cosine similarity
-    new_cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix).astype(np.float32)
+    # Save the fitted vectorizer to disk (tiny, ~8 KB)
+    joblib.dump(tfidf_vectorizer, os.path.join(models_dir, 'tfidf_vectoriser.pkl'))
 
-    # Save to disk
-    np.save(os.path.join(models_dir, 'cosine_sim.npy'), new_cosine_sim)
-
-    # Hot-reload into memory
-    cosine_sim = new_cosine_sim
-
-    msg = f"Cosine similarity matrix rebuilt: {new_cosine_sim.shape}. Saved to disk."
+    msg = f"TF-IDF matrix rebuilt: {tfidf_matrix.shape} ({tfidf_matrix.data.nbytes / 1024**2:.1f} MB sparse). Vectorizer saved."
     print(f"[OK] {msg}")
     return msg
 
